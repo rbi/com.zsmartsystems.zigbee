@@ -27,6 +27,11 @@ import com.zsmartsystems.zigbee.ZigBeeProfileType;
  */
 public class ZigBeeConsoleNodeListCommand extends ZigBeeConsoleAbstractCommand {
     @Override
+    protected ZigBeeConsoleArgument initializeArguments() {
+        return null;
+    }
+
+    @Override
     public String getCommand() {
         return "nodelist";
     }

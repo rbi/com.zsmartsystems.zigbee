@@ -25,6 +25,11 @@ import com.zsmartsystems.zigbee.zcl.clusters.general.WriteAttributesResponse;
  */
 public class ZigBeeConsoleAttributeWriteCommand extends ZigBeeConsoleAbstractCommand {
     @Override
+    protected ZigBeeConsoleArgument initializeArguments() {
+        return null;
+    }
+
+    @Override
     public String getCommand() {
         return "write";
     }

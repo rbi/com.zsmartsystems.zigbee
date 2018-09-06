@@ -27,6 +27,11 @@ import com.zsmartsystems.zigbee.zdo.field.RoutingTable;
  */
 public class ZigBeeConsoleDescribeNodeCommand extends ZigBeeConsoleAbstractCommand {
     @Override
+    protected ZigBeeConsoleArgument initializeArguments() {
+        return null;
+    }
+
+    @Override
     public String getCommand() {
         return "node";
     }
