@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.zsmartsystems.zigbee.CommandResult;
+import com.zsmartsystems.zigbee.ZigBeeAddress;
 import com.zsmartsystems.zigbee.ZigBeeCommand;
 import com.zsmartsystems.zigbee.ZigBeeNetworkManager;
 import com.zsmartsystems.zigbee.transport.ZigBeeTransportProgressState;
@@ -67,6 +68,11 @@ public class ZigBeeTransaction {
     private ZigBeeCommand command;
     private ScheduledFuture<?> timeoutTask;
 
+    /**
+     * The number of times we've sent this command. Used for retry management.
+     */
+    private int sendCnt = 0;
+
     private TransactionState state = TransactionState.WAITING;
 
     /**
@@ -75,21 +81,15 @@ public class ZigBeeTransaction {
      * This must account for the total time from when the data is sent, until the response is expected, included any
      * queueing delay in the transport.
      */
-    private final static int TRANSACTION_TIMER = 12000;
-
-    /**
-     * The amount of time (in milliseconds) to wait for a response from the transport to acknowledge the command was
-     * transmitted.
-     */
-    private final static int TRANSACTION_TIMER_BEFORE_TX = 4000;
+    private final static int TRANSACTION_TIMER_1 = 10000;
+    private int timeout1 = TRANSACTION_TIMER_1;
 
     /**
      * The amount of time (in milliseconds) to wait for a response from the transport once the command has been
      * transmitted.
      */
-    private final static int TRANSACTION_TIMER_AFTER_TX = 8000;
-
-    private int timeout = TRANSACTION_TIMER;
+    private final static int TRANSACTION_TIMER_2 = 8000;
+    private int timeout2 = TRANSACTION_TIMER_2;
 
     /**
      * Transaction constructor
@@ -107,49 +107,130 @@ public class ZigBeeTransaction {
     }
 
     /**
-     * Sends {@link ZigBeeCommand} command and uses the {@link ZigBeeTransactionMatcher} to match the response.
-     * The task will be timed out if there is no response.
-     *
-     * @return the {@link CommandResult} future.
+     * Resets the transaction
      */
-    public void send() {
-        logger.debug("Sending transaction: {} ==== {}", command, responseMatcher);
-        synchronized (command) {
-            // If we have no response matcher then we don't worry about adding the listener, or starting the
-            if (responseMatcher != null) {
-                transactionManager.addTransactionListener(this);
-
-                // Schedule a task to timeout the transaction
-                startTimer(timeout);
-            } else {
-                // Wait for the transport layer to confirm the command was sent
-                startTimer(TRANSACTION_TIMER_BEFORE_TX);
-            }
-
-            transactionManager.send(command);
-        }
+    protected void resetTransaction() {
+        state = TransactionState.WAITING;
     }
 
     /**
+     * Starts the transaction. Called by the {@link ZigBeeTransactionManager} when it sends the transaction.
+     *
+     * @return the {@link ZigBeeCommand} to be transmitted
+     */
+    protected ZigBeeCommand startTransaction() {
+        state = TransactionState.DISPATCHED;
+        startTimer(timeout1);
+        sendCnt++;
+        return command;
+    }
+
+    /**
+     * Gets the {@link ZigBeeAddress} that this transaction is being sent to
+     *
+     * @return the {@link ZigBeeAddress} for the transaction
+     */
+    protected ZigBeeAddress getDestinationAddress() {
+        return command.getDestinationAddress();
+    }
+
+    /**
+     * Gets the number of times this transaction has been sent. The sendCnt is incremented in the
+     * {@link #startTransaction()} method.
+     *
+     * @return the number of times the transaction has been sent
+     */
+    protected int getSendCnt() {
+        return sendCnt;
+    }
+
+    /**
+     * Gets the value of timer 1.
+     * <p>
+     * This timer is started when the transaction is first released. If the transport does not provide state updates to
+     * confirm transmission of the frame, then this timer must account for the full period required to receive the
+     * response. If the transport does provide state updates, then this timer only needs to account for the time to
+     * receive this expected state response.
+     *
      * @return the current timeout in milliseconds
      */
-    public int getTimeout() {
-        return timeout;
+    public int getTimerPeriod1() {
+        return timeout1;
     }
 
     /**
+     * Sets the value of timer 1.
+     * <p>
+     * This timer is started when the transaction is first released. If the transport does not provide state updates to
+     * confirm transmission of the frame, then this timer must account for the full period required to receive the
+     * response. If the transport does provide state updates, then this timer only needs to account for the time to
+     * receive this expected state response.
+     *
      * @param timeout the timeout to set in milliseconds
      */
-    public void setTimeout(int timeout) {
-        this.timeout = timeout;
+    public void setTimerPeriod1(int timeout) {
+        this.timeout1 = timeout;
     }
 
+    /**
+     * Gets the value of timer 2.
+     * <p>
+     * This timer is started when the transport provides a state update to confirm the frame has been transmitted.
+     *
+     * @return the current timeout in milliseconds
+     */
+    public int getTimerPeriod2() {
+        return timeout1;
+    }
+
+    /**
+     * Sets the value of timer 2.
+     * <p>
+     * This timer is started when the transport provides a state update to confirm the frame has been transmitted.
+     *
+     * @param timeout the timeout to set in milliseconds
+     */
+    public void setTimerPeriod2(int timeout) {
+        this.timeout1 = timeout;
+    }
+
+    /**
+     * Sets the future for this transaction. The transaction will be completed when the transaction finishes or aborts.
+     *
+     * @param transactionFuture the {@link ZigBeeTransactionFuture} to be completed when the transaction completes.
+     */
     protected void setFuture(ZigBeeTransactionFuture transactionFuture) {
         this.transactionFuture = transactionFuture;
     }
 
+    /**
+     * Gets the future for this transaction. The transaction will be completed when the transaction finishes or aborts.
+     *
+     * @return the {@link ZigBeeTransactionFuture} to be completed when the transaction completes.
+     */
     protected ZigBeeTransactionFuture getFuture() {
         return transactionFuture;
+    }
+
+    /**
+     * Cancels the transaction. The transaction will immediately be cancelled and the state will be set to
+     * {@link TransactionState#FAILED}.
+     * No further retry will be conducted and the transaction manager will not be notified (the assumption being that
+     * the cancellation is made through the transaction manager).
+     */
+    protected void cancel() {
+        state = TransactionState.FAILED;
+
+        if (timeoutTask != null) {
+            timeoutTask.cancel(false);
+        }
+        logger.debug("Transaction terminated: {}", command);
+        if (transactionFuture != null) {
+            synchronized (transactionFuture) {
+                transactionFuture.cancel(false);
+                transactionFuture.notify();
+            }
+        }
     }
 
     /**
@@ -162,7 +243,9 @@ public class ZigBeeTransaction {
         // Ensure that received command is not processed before command is sent
         // and hence transaction ID for the command set.
         synchronized (command) {
+            logger.debug("commandReceived: {} ----> {}", command, receivedCommand);
             if (responseMatcher.isTransactionMatch(command, receivedCommand)) {
+                logger.debug("commandReceived: MATCHED");
                 completeTransaction(receivedCommand);
             }
         }
@@ -183,46 +266,41 @@ public class ZigBeeTransaction {
     }
 
     private void completeTransaction(ZigBeeCommand receivedCommand) {
+        state = TransactionState.COMPLETE;
         if (timeoutTask != null) {
             timeoutTask.cancel(false);
         }
-        logger.debug("Transaction complete: {}", command);
+        logger.debug("Transaction completed: {}", command);
         if (transactionFuture != null) {
             synchronized (transactionFuture) {
                 transactionFuture.set(new CommandResult(receivedCommand));
                 transactionFuture.notify();
             }
         }
-        if (responseMatcher != null) {
-            transactionManager.removeTransactionListener(this);
-        }
-        state = TransactionState.COMPLETE;
+
+        transactionManager.transactionComplete(this, TransactionState.COMPLETE);
     }
 
     private void cancelTransaction() {
+        state = TransactionState.FAILED;
         if (timeoutTask != null) {
             timeoutTask.cancel(false);
         }
         logger.debug("Transaction cancelled: {}", command);
-        if (transactionFuture != null) {
-            synchronized (transactionFuture) {
-                transactionFuture.cancel(false);
-                transactionFuture.notify();
-            }
-        }
-        if (responseMatcher != null) {
-            transactionManager.removeTransactionListener(this);
-        }
-        state = TransactionState.FAILED;
+
+        transactionManager.transactionComplete(this, TransactionState.FAILED);
     }
 
     /**
+     * Notifies of an updated state from the transport layer. This is used to see if the transaction state can be
+     * progressed.
      *
-     * @param state
-     * @param transactionId
+     * @param state the {@link ZigBeeTransportProgressState} of the transaction
+     * @param transactionId the transaction ID
      */
-    public void commandStatusReceived(ZigBeeTransportProgressState progress, int transactionId) {
+    public void transactionStatusReceived(ZigBeeTransportProgressState progress, int transactionId) {
         synchronized (command) {
+            logger.debug("commandStatusReceived: TID {} ---> {}", transactionId, command.getTransactionId());
             if (command.getTransactionId() != transactionId) {
                 return;
             }
@@ -245,7 +323,7 @@ public class ZigBeeTransaction {
                     state = TransactionState.TRANSMITTED;
 
                     // The timer is reset here as we have confirmation the command is sent
-                    startTimer(TRANSACTION_TIMER_AFTER_TX);
+                    startTimer(timeout2);
                     break;
                 case RX_NAK:
                     // The transport layer failed to get an ack from the remote device
@@ -260,5 +338,10 @@ public class ZigBeeTransaction {
             }
         }
         logger.debug("Transaction state updated: TID {} -> {} == {}", transactionId, progress, state);
+    }
+
+    @Override
+    public String toString() {
+        return "ZigBeeTransaction [state=" + state + ", sendCnt=" + sendCnt + ", command=" + command + "]";
     }
 }

@@ -272,7 +272,7 @@ public class ZigBeeDongleTiCc2531
     }
 
     @Override
-    public void sendCommand(final ZigBeeApsFrame apsFrame) {
+    public void sendCommand(final int msgTag, final ZigBeeApsFrame apsFrame) {
         synchronized (networkManager) {
             final short sender;
             if (apsFrame.getProfile() == 0) {
