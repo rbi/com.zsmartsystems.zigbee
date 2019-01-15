@@ -29,6 +29,7 @@ import com.zsmartsystems.zigbee.dao.ZigBeeNodeDao;
 import com.zsmartsystems.zigbee.internal.NotificationService;
 import com.zsmartsystems.zigbee.transaction.ZigBeeTransactionMatcher;
 import com.zsmartsystems.zigbee.zcl.ZclCommand;
+import com.zsmartsystems.zigbee.zcl.protocol.ZclCommandDirection;
 import com.zsmartsystems.zigbee.zdo.command.ManagementBindRequest;
 import com.zsmartsystems.zigbee.zdo.command.ManagementBindResponse;
 import com.zsmartsystems.zigbee.zdo.command.ManagementPermitJoiningRequest;
@@ -657,33 +658,50 @@ public class ZigBeeNode implements ZigBeeCommandListener {
 
         ZigBeeEndpoint endpoint = endpoints.get(endpointAddress.getEndpoint());
         if (endpoint == null) {
-            endpoint = createEndpoint(endpointAddress.getEndpoint(), command.getClusterId());
+            endpoint = createEndpoint(endpointAddress.getEndpoint(), command.getClusterId(), zclCommand.getCommandDirection());
+logger.trace("!!!! create unknown endpoint {} for command {}", endpoint, command);
             addEndpoint(endpoint);
-        } else if (endpoint.getOutputCluster(command.getClusterId()) == null) {
-            endpoint = addClusterToEndpoint(endpoint, command.getClusterId());
-            updateEndpoint(endpoint);
+        } else if ((zclCommand.getCommandDirection() == ZclCommandDirection.CLIENT_TO_SERVER && endpoint.getOutputCluster(command.getClusterId()) == null ) ||
+(zclCommand.getCommandDirection() == ZclCommandDirection.SERVER_TO_CLIENT && endpoint.getInputCluster(command.getClusterId()) == null )  ) {
+logger.trace("!!!! update unknown cluster: endpoint {} for command {}", endpoint, command);
+            endpoint = addClusterToEndpoint(endpoint, command.getClusterId(), zclCommand.getCommandDirection());
+            //updateEndpoint(endpoint);
+            addEndpoint(endpoint);
         }
         endpoint.commandReceived(zclCommand);
     }
 
-    private ZigBeeEndpoint addClusterToEndpoint(ZigBeeEndpoint original, Integer clusterId) {
+    private ZigBeeEndpoint addClusterToEndpoint(ZigBeeEndpoint original, Integer clusterId, ZclCommandDirection direction) {
         ZigBeeEndpoint endpoint = new ZigBeeEndpoint(this, original.getEndpointId());
         endpoint.setProfileId(original.getProfileId());
         endpoint.setDeviceId(original.getDeviceId());
         endpoint.setDeviceVersion(original.getDeviceVersion());
-        endpoint.setInputClusterIds(original.getInputClusterIds());
-        List<Integer> outputClusters = new ArrayList<>();
-        outputClusters.addAll(original.getOutputClusterIds());
-        outputClusters.add(clusterId);
-        endpoint.setOutputClusterIds(outputClusters);
 
+        if (direction == ZclCommandDirection.CLIENT_TO_SERVER) {
+            endpoint.setInputClusterIds(original.getInputClusterIds());
+            List<Integer> outputClusters = new ArrayList<>();
+            outputClusters.addAll(original.getOutputClusterIds());
+            outputClusters.add(clusterId);
+            endpoint.setOutputClusterIds(outputClusters);
+        } else {
+            endpoint.setOutputClusterIds(original.getOutputClusterIds());
+            List<Integer> inputClusters = new ArrayList<>();
+            inputClusters.addAll(original.getInputClusterIds());
+            inputClusters.add(clusterId);
+            endpoint.setInputClusterIds(inputClusters);
+        }
         return endpoint;
     }
 
-    private ZigBeeEndpoint createEndpoint(final int endpointId, int clusterId) {
+    private ZigBeeEndpoint createEndpoint(final int endpointId, int clusterId, ZclCommandDirection direction) {
         ZigBeeEndpoint endpoint = new ZigBeeEndpoint(this, endpointId);
-        endpoint.setInputClusterIds(Collections.emptyList());
-        endpoint.setOutputClusterIds(Collections.singletonList(clusterId));
+        if (direction == ZclCommandDirection.CLIENT_TO_SERVER) {
+            endpoint.setInputClusterIds(Collections.emptyList());
+            endpoint.setOutputClusterIds(Collections.singletonList(clusterId));
+        } else {
+            endpoint.setOutputClusterIds(Collections.emptyList());
+            endpoint.setInputClusterIds(Collections.singletonList(clusterId));
+        }
 
         return endpoint;
     }
