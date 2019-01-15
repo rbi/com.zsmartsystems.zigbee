@@ -207,7 +207,7 @@ public class ZigBeeEndpoint {
      *
      * @param inputClusterIds the input cluster IDs
      */
-    public void setInputClusterIds(List<Integer> inputClusterIds) {
+    public void setInputClusterIds(Collection<Integer> inputClusterIds) {
         inputClusters.clear();
 
         logger.debug("{}: Setting input clusters {}", getEndpointAddress(), inputClusterIds);
@@ -249,7 +249,7 @@ public class ZigBeeEndpoint {
      *
      * @param outputClusterIds the output cluster IDs
      */
-    public void setOutputClusterIds(List<Integer> outputClusterIds) {
+    public void setOutputClusterIds(Collection<Integer> outputClusterIds) {
         outputClusters.clear();
 
         logger.debug("{}: Setting output clusters {}", getEndpointAddress(), outputClusterIds);
@@ -317,7 +317,7 @@ public class ZigBeeEndpoint {
         return cluster;
     }
 
-    private void updateClusters(Map<Integer, ZclCluster> clusters, List<Integer> newList, boolean isInput) {
+    private void updateClusters(Map<Integer, ZclCluster> clusters, Collection<Integer> newList, boolean isInput) {
         // Get a list any clusters that are no longer in the list
         List<Integer> removeIds = new ArrayList<Integer>();
         for (ZclCluster cluster : clusters.values()) {

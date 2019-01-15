@@ -656,9 +656,36 @@ public class ZigBeeNode implements ZigBeeCommandListener {
         ZigBeeEndpointAddress endpointAddress = (ZigBeeEndpointAddress) zclCommand.getSourceAddress();
 
         ZigBeeEndpoint endpoint = endpoints.get(endpointAddress.getEndpoint());
-        if (endpoint != null) {
-            endpoint.commandReceived(zclCommand);
+        if (endpoint == null) {
+            endpoint = createEndpoint(endpointAddress.getEndpoint(), command.getClusterId());
+            addEndpoint(endpoint);
+        } else if (endpoint.getOutputCluster(command.getClusterId()) == null) {
+            endpoint = addClusterToEndpoint(endpoint, command.getClusterId());
+            updateEndpoint(endpoint);
         }
+        endpoint.commandReceived(zclCommand);
+    }
+
+    private ZigBeeEndpoint addClusterToEndpoint(ZigBeeEndpoint original, Integer clusterId) {
+        ZigBeeEndpoint endpoint = new ZigBeeEndpoint(this, original.getEndpointId());
+        endpoint.setProfileId(original.getProfileId());
+        endpoint.setDeviceId(original.getDeviceId());
+        endpoint.setDeviceVersion(original.getDeviceVersion());
+        endpoint.setInputClusterIds(original.getInputClusterIds());
+        List<Integer> outputClusters = new ArrayList<>();
+        outputClusters.addAll(original.getOutputClusterIds());
+        outputClusters.add(clusterId);
+        endpoint.setOutputClusterIds(outputClusters);
+
+        return endpoint;
+    }
+
+    private ZigBeeEndpoint createEndpoint(final int endpointId, int clusterId) {
+        ZigBeeEndpoint endpoint = new ZigBeeEndpoint(this, endpointId);
+        endpoint.setInputClusterIds(Collections.emptyList());
+        endpoint.setOutputClusterIds(Collections.singletonList(clusterId));
+
+        return endpoint;
     }
 
     /**
